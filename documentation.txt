@@ -1,0 +1,90 @@
+ADB Device Control Library Documentation
+========================================
+
+1. BaseDevice Class
+-------------------
+Core functionality for all device types.
+
+Constructor:
+  BaseDevice(adb_path=None)
+    - adb_path: Optional path to adb executable
+
+Key Methods:
+- get_info(device_identifier): Prints device information
+- screenshot(device_identifier): Returns PIL Image of screen
+- text_input(device_identifier, text): Inputs text to device
+- screenInput(device_identifier, x, y): Taps at coordinates
+- screenSwipe(device_identifier, x1,y1,x2,y2): Performs swipe
+- resolution(device_identifier): Returns [width, height]
+- orientation(device_identifier): Returns current rotation
+- wlan_ip(device_identifier): Returns IP address
+
+2. Phone Class
+-------------
+For physical Android devices.
+
+Constructor:
+  Phone(name=None, vertical=True, adb_path=None)
+    - name: Device serial (optional)
+    - vertical: Screen orientation
+    - adb_path: Custom ADB path
+
+Methods inherit all BaseDevice functionality with device_identifier handled automatically.
+
+3. Emulator Class
+----------------
+For Android emulators.
+
+Constructor:
+  Emulator(port=5554, devices=0, emulator=True, name=None, adb_path=None)
+    - port: Emulator port (default 5554)
+    - devices: Number of devices
+    - emulator: Must be True
+    - name: Custom name
+    - adb_path: Custom ADB path
+
+4. ImageOcr Class
+----------------
+For text recognition from screenshots.
+
+Constructor:
+  ImageOcr(im)
+    - im: PIL Image object
+
+Methods:
+- crop_image(x1,y1,x2,y2,res_scalar_x,res_scalar_y): Returns cropped image
+- get_text(): Returns recognized text as string
+
+5. Coordinate System
+-------------------
+All coordinates are based on reference resolution (1920x1080) and automatically scaled to device resolution.
+
+6. Key Events
+------------
+Common keyevent codes:
+3 - Home
+4 - Back
+24 - Volume Up
+25 - Volume Down
+26 - Power
+27 - Camera
+82 - Menu
+
+7. Troubleshooting
+-----------------
+- Connection issues: Verify ADB devices shows your device
+- OCR failures: Check Tesseract installation
+- Input issues: Verify screen coordinates are correct
+
+8. Examples
+----------
+Basic device control:
+  phone = Phone()
+  phone.screenInput(100, 200)
+  phone.text_input("Hello")
+
+OCR text recognition:
+  img = phone.screenshot()
+  ocr = ImageOcr(img)
+  print(ocr.get_text())
+
