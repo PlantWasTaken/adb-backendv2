@@ -106,8 +106,8 @@ class BaseDevice:
 
     def screenshot(self, device_identifier: str) -> Image.Image:
         timestamp = str(int(time.time()))
-        temp_path = f"/data/local/tmp/emulator-{device_identifier}.png"
-        local_path = os.path.join(os.getcwd(), f"emulator-{device_identifier}.png")
+        temp_path = f"/data/local/tmp/{device_identifier}.png"
+        local_path = os.path.join(os.getcwd(), f"{device_identifier}.png")
         
         subprocess.run(
             f'"{self.adb}" -s {device_identifier} shell screencap -p {temp_path}',
@@ -290,7 +290,7 @@ class Emulator(BaseDevice):
     ) -> None:
         super().__init__(adb_path)
         self.port = port
-        self.devices = devices
+        self.devices = self.find_devices()
         self.emulator = emulator
         self.name = name
         
@@ -313,8 +313,28 @@ class Emulator(BaseDevice):
         
         self.get_info()
 
+    def find_devices(self) -> List[str]:
+        devices_output = subprocess.run(
+            f'"{self.adb}" devices',
+            shell=True, capture_output=True, text=True
+        )
+
+        devices = devices_output.stdout.split()
+        devices = devices[4:]
+        devices = [i for i in devices if i != 'device' and 'phone' not in i]
+
+        if not devices:
+            raise ConnectionError("No emulator devices found")
+        else:
+            print(f'Found {len(devices)} emulator devices')
+            for i in devices:
+                print(f'Port: {i[-4:]} with name: {i}')
+        return len(devices)
+
+    
     def _connect_emulators(self) -> None:
         ports = self._generate_ports()
+
         if self.port not in ports:
             logger.warning(f"Port {self.port} not found, defaulting to 5554")
             self.port = 5554
@@ -325,13 +345,14 @@ class Emulator(BaseDevice):
         )
 
     def _generate_ports(self) -> List[int]:
+        #leave blank for auto port generation
         if self.devices == -1:
-            return [self.port]
+            return [str(self.port)]
         if self.devices == 1:
-            return [5554]
+            return ['5554']
         if self.devices == 2:
-            return [5554, 5556]
-        return [5554 + 2 * i for i in range(self.devices)]
+            return ['5554', '5556']
+        return [str(5554 + 2 * i) for i in range(self.devices)]
 
     # All original Emulator methods maintained
     def get_info(self) -> None:
@@ -429,6 +450,7 @@ class ImageOcr:
         y2_scaled = y2 * res_scalar_y
         return self.im.crop((x1_scaled, y1_scaled, x2_scaled, y2_scaled))
 
-    def get_text(self) -> str:
+    def get_text(self) -> list:
         text = pytesseract.image_to_string(self.im).split()
-        return ' '.join(text)
+        return text
+        #return ' '.join(text)
