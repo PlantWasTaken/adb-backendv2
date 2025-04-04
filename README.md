@@ -36,4 +36,4 @@ device.screenInput(x=500, y=500)
 
 See documentation.txt for complete API reference.
 
-License: MIT
+License: Apache 2.0
