@@ -87,7 +87,7 @@ class BaseDevice:
     # MAINTAINED ORIGINAL FUNCTIONALITY
     def get_info(self, device_identifier: str) -> None:
         logger.info(f"\nInfo for device: {device_identifier}")
-        subprocess.run(f'"{self.adb}" -s {device_identifier} shell wm size', check=True, shell=True)
+        logger.info(f"Resolution: {self.resolution()}")
         logger.info(f"App in focus: {self._currentapp}")
         logger.info(f"Orientation: {self.ORIENTATION}")
         logger.info(f"wlan ip: {self.wlan_ip(device_identifier)}")
@@ -159,12 +159,17 @@ class BaseDevice:
         return orientation.stdout.replace("mCurrentRotation=", "").strip()
 
     def resolution(self, device_identifier: str) -> List[int]:
+        orientation = self.orientation()
+
         res = subprocess.run(
             f'"{self.adb}" -s {device_identifier} shell wm size',
             shell=True, text=True, capture_output=True
         )
         self.check_connection(res)
         res = res.stdout.split()[-1]
+
+        if orientation == 'ROTATION_90' or orientation == 'ROTATION_270': #roation logic
+            res = res.replace('x', ' ').split()[1] + 'x' + res.replace('x', ' ').split()[0]
         return list(map(int, res.replace('x', ' ').split()))
 
     def wlan_ip(self, device_identifier: str) -> str:
@@ -202,19 +207,21 @@ class Phone(BaseDevice):
     def __init__(self, name: str, vertical: bool = True, adb_path: Optional[str] = None) -> None:
         super().__init__(adb_path)
         self.name = name
+        self.identifier = self.name
         
         if not name:
             found = self.find_device()
             if not found:
                 raise ConnectionError("No phone devices found")
             self.name = found[0]
+
             logger.info(f"Auto-selected device: {self.name}")
 
         # Original resolution scaling logic
-        phone_res = self.resolution(self.name)
-        app_res = self.app_resolution(self.name)
-        self.ORIENTATION = self.orientation(self.name)
-        self._currentapp = self.currentfocus(self.name)
+        phone_res = self.resolution()
+        app_res = self.app_resolution()
+        self.ORIENTATION = self.orientation()
+        self._currentapp = self.currentfocus()
 
         if self.ORIENTATION in ('ROTATION_90', 'ROTATION_270'):
             self.abs_res_scalar_x = phone_res[0] / self.BASE_RESOLUTION_EMU[0]
@@ -276,7 +283,7 @@ class Phone(BaseDevice):
     def app_resolution(self) -> List[float]:
         return super().app_resolution(self.name)
 
-    def wlan_ip(self) -> str:
+    def wlan_ip(self, device_identifier: str) -> str:
         return super().wlan_ip(self.name)
 
 class Emulator(BaseDevice):
