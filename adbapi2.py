@@ -8,24 +8,16 @@ from PIL import Image, ImageDraw, ImageFilter
 import pytesseract
 import cv2
 import numpy as np
+from io import BytesIO
 
+os.environ['OMP_THREAD_LIMIT'] = '8'
+os.environ['TESSDATA_PREFIX'] = os.path.join(os.getcwd(), 'tessdata')
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('ADBAPI')
-
-from functools import wraps
-
-def check_connection_decorator(func):
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        result = func(self, *args, **kwargs)
-        if isinstance(result, subprocess.CompletedProcess):
-            self.check_connection(result)
-        return result
-    return wrapper
 
 class BaseDevice:
     def __init__(self, adb_path: Optional[str] = None) -> None:
@@ -59,10 +51,8 @@ class BaseDevice:
     def check_connection(self, completed_process: subprocess.CompletedProcess) -> bool:
         if completed_process.returncode != 0:
             raise ConnectionError(completed_process.stderr)
-        return True
+        else: return True
 
-    # IMPROVED CORE FUNCTIONALITY
-    @check_connection_decorator
     def _establish_secure_connection(self, max_retries: int = 3) -> None:
         for attempt in range(max_retries):
             try:
@@ -98,8 +88,6 @@ class BaseDevice:
                     raise ConnectionError("ADB server not responding after multiple attempts")
                 time.sleep(1)
 
-    # MAINTAINED ORIGINAL FUNCTIONALITY
-    @check_connection_decorator
     def get_info(self, device_identifier: str) -> None:
         logger.info(f"\nInfo for device: {device_identifier}")
         logger.info(f"Resolution: {self.resolution()}")
@@ -108,7 +96,6 @@ class BaseDevice:
         logger.info(f"wlan ip: {self.wlan_ip(device_identifier)}")
         subprocess.run(f'"{self.adb}" -s {device_identifier} get-serialno', shell=True)
 
-    @check_connection_decorator
     def app_resolution(self, device_identifier: str) -> List[float]:
         text = subprocess.run(
             f'"{self.adb}" -s {device_identifier} shell dumpsys window | find "app="',
@@ -120,28 +107,30 @@ class BaseDevice:
         app_res = current_app_res[0].replace('app=', "").replace('x', ' ')
         return [float(i) for i in app_res.split()]
 
-    @check_connection_decorator
     def screenshot(self, device_identifier: str) -> Image.Image:
-        timestamp = str(int(time.time()))
-        temp_path = f"/data/local/tmp/{device_identifier}.png"
-        local_path = os.path.join(os.getcwd(), f"{device_identifier}.png")
-        
-        subprocess.run(
-            f'"{self.adb}" -s {device_identifier} shell screencap -p {temp_path}',
-            shell=True, check=True
-        )
-        subprocess.run(
-            f'"{self.adb}" -s {device_identifier} pull {temp_path} "{local_path}"',
-            shell=True, check=True
-        )
-        subprocess.run(
-            f'"{self.adb}" -s {device_identifier} shell rm {temp_path}',
-            shell=True, check=False
-        )
-        
-        return Image.open(local_path)
+        timestamp = time.time()
 
-    @check_connection_decorator
+        # Run the screencap command to capture the screenshot directly to stdout
+        result = subprocess.run(
+            f'"{self.adb}" -s {device_identifier} exec-out screencap -p',
+            shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        # Check for errors in stderr
+        if result.stderr:
+            print(f"Error in capturing screenshot: {result.stderr.decode()}")
+            return None
+
+        # The screenshot image is now in stdout, which we can read directly into a PIL Image
+        screenshot_data = result.stdout
+
+        # Create a BytesIO object from the screenshot data
+        image = Image.open(BytesIO(screenshot_data))
+
+        print(f'Screenshot time: {time.time() - timestamp}')
+        return image
+
+
     def currentfocus(self, device_identifier: str) -> str:
         _currentfocus = subprocess.run(
             f'"{self.adb}" -s {device_identifier} shell dumpsys window | find "mCurrentFocus"',
@@ -150,7 +139,6 @@ class BaseDevice:
         self.check_connection(_currentfocus)
         return _currentfocus.stdout.replace("mCurrentFocus=", "").strip()
 
-    @check_connection_decorator
     def text_input(self, device_identifier: str, text: str) -> None:
         text = text.replace(" ", "%s")
         subprocess.run(
@@ -158,7 +146,6 @@ class BaseDevice:
             shell=True, text=True, capture_output=True
         )
 
-    @check_connection_decorator
     def keyevent_input(self, device_identifier: str, code: Union[int, str]) -> None:
         try:
             code = int(code)
@@ -169,7 +156,6 @@ class BaseDevice:
         except ValueError:
             logger.error(f"Invalid keyevent code: {code}")
 
-    @check_connection_decorator
     def orientation(self, device_identifier: str) -> str:
         orientation = subprocess.run(
             f'"{self.adb}" -s {device_identifier} shell dumpsys window | find "mCurrentRotation"',
@@ -178,7 +164,6 @@ class BaseDevice:
         self.check_connection(orientation)
         return orientation.stdout.replace("mCurrentRotation=", "").strip()
 
-    @check_connection_decorator
     def resolution(self, device_identifier: str) -> List[int]:
         orientation = self.orientation()
 
@@ -193,7 +178,6 @@ class BaseDevice:
             res = res.replace('x', ' ').split()[1] + 'x' + res.replace('x', ' ').split()[0]
         return list(map(int, res.replace('x', ' ').split()))
 
-    @check_connection_decorator
     def wlan_ip(self, device_identifier: str) -> str:
         try:
             result = subprocess.run(
@@ -258,7 +242,6 @@ class Phone(BaseDevice):
         
         self.get_info()
 
-    @check_connection_decorator
     def find_device(self) -> List[str]:
         devices_output = subprocess.run(
             f'"{self.adb}" devices',
@@ -269,7 +252,6 @@ class Phone(BaseDevice):
         phones = phones[4:]
         return [i for i in phones if i != 'device' and 'emulator' not in i]
 
-    @check_connection_decorator
     def get_battery_info(self) -> dict:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell dumpsys battery',
@@ -282,7 +264,6 @@ class Phone(BaseDevice):
                 info[key.strip()] = value.strip()
         return info
 
-    @check_connection_decorator
     def get_android_version(self) -> str:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell getprop ro.build.version.release',
@@ -290,7 +271,6 @@ class Phone(BaseDevice):
         )
         return result.stdout.strip()
 
-    @check_connection_decorator
     def get_sdk_version(self) -> str:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell getprop ro.build.version.sdk',
@@ -298,7 +278,6 @@ class Phone(BaseDevice):
         )
         return result.stdout.strip()
 
-    @check_connection_decorator
     def get_device_model(self) -> str:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell getprop ro.product.model',
@@ -306,7 +285,6 @@ class Phone(BaseDevice):
         )
         return result.stdout.strip()
 
-    @check_connection_decorator
     def get_manufacturer(self) -> str:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell getprop ro.product.manufacturer',
@@ -314,7 +292,6 @@ class Phone(BaseDevice):
         )
         return result.stdout.strip()
 
-    @check_connection_decorator
     def get_total_storage(self) -> str:
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell df /data',
@@ -354,7 +331,6 @@ class Phone(BaseDevice):
 
         return info
 
-    @check_connection_decorator
     def get_current_wifi_info(self):
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell dumpsys wifi',
@@ -365,7 +341,6 @@ class Phone(BaseDevice):
         # Optionally parse output here, e.g. SSID, BSSID, RSSI, etc.
         return output
 
-    @check_connection_decorator
     def get_wifi_verbose_info(self):
         result = subprocess.run(
             f'"{self.adb}" -s {self.name} shell cmd wifi status',
@@ -456,7 +431,6 @@ class Emulator(BaseDevice):
         
         self.get_info()
 
-    @check_connection_decorator
     def find_devices(self) -> List[str]:
         devices_output = subprocess.run(
             f'"{self.adb}" devices',
@@ -475,7 +449,6 @@ class Emulator(BaseDevice):
                 print(f'Port: {i[-4:]} with name: {i}')
         return len(devices)
 
-    @check_connection_decorator
     def _connect_emulators(self) -> None:
         ports = self._generate_ports()
         print(ports)
@@ -558,7 +531,6 @@ class Emulator(BaseDevice):
         except Exception:
             return "127.0.0.1"
 
-    @check_connection_decorator
     def get_info(self) -> None:
         logger.info(f"\nInfo for emulator: {self.identifier}")
         subprocess.run(f'"{self.adb}" -s {self.identifier} shell wm size', check=True, shell=True)
@@ -642,38 +614,47 @@ class ImageOcr:
         return matches
 
 
-    def locate_text(self, target_text: str) -> str:
+    def locate_text(self, target_text: str):
+        start = time.time()
+
+        allowed_chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,. '
+
         """Locate specific text and save image with bounding boxes"""
         # Convert the PIL image to OpenCV format (NumPy array)
         open_cv_image = cv2.cvtColor(np.array(self.im), cv2.COLOR_RGB2BGR)
-        
+
         # Convert the image to grayscale (helps in text detection)
         gray_image = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
 
         # Optional: Apply thresholding to make text clearer
         _, threshold_image = cv2.threshold(gray_image, 150, 255, cv2.THRESH_BINARY)
 
-        # Use pytesseract to extract text with the corresponding bounding box
-        custom_config = r'--oem 3 --psm 6'
+        # Perform OCR using Tesseract
+        custom_config = r'--oem 1 --psm 3'
         detection_result = pytesseract.image_to_data(threshold_image, output_type=pytesseract.Output.DICT, config=custom_config)
-        
-        #print(detection_result['text'])
-    
-        # Loop through the results and find the desired text (case-insensitive)
+
         words_data = []
         for i in range(len(detection_result['text'])):
             word = detection_result['text'][i].strip().lower()
             if word:
-                words_data.append({
-                    'text': word,
-                    'left': detection_result['left'][i],
-                    'top': detection_result['top'][i],
-                    'width': detection_result['width'][i],
-                    'height': detection_result['height'][i]
-                })
-        #print("OCR words detected:")
-        #for w in words_data:
-        #    print(f" - {w['text']} at ({w['left']}, {w['top']})")
+                # Filter out single-character words and words that only consist of non-alphanumeric characters
+                if len(word) > 1 and re.search(r'[a-zA-Z0-9]', word):
+                    # Filter out unwanted characters (only allow alphanumeric and basic punctuation)
+                    word = ''.join(c for c in word if c in allowed_chars)
+
+                    # Only keep the word if it has at least one alphanumeric character
+                    if word and re.search(r'[a-zA-Z0-9]', word):
+                        x = detection_result['left'][i]
+                        y = detection_result['top'][i]
+                        w = detection_result['width'][i]
+                        h = detection_result['height'][i]
+                        words_data.append({
+                            'text': word,
+                            'left': x,
+                            'top': y,
+                            'width': w,
+                            'height': h
+                        })
 
         targets = []
         if isinstance(target_text, str):
@@ -686,12 +667,18 @@ class ImageOcr:
             all_matches = self.match_all_phrases(words_data, phrase_words)
 
             for match in all_matches:
+                # Just append the coordinates to targets, no drawing bounding boxes
                 x1 = match[0]['left']
                 y1 = match[0]['top']
                 x2 = match[-1]['left'] + match[-1]['width']
                 y2 = match[-1]['top'] + match[-1]['height']
 
-                cv2.rectangle(open_cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # Adding padding/margin for clarity
+                padding = 5
+                x1, y1, x2, y2 = x1 - padding, y1 - padding, x2 + padding, y2 + padding
+
+                # Draw bounding box on the image (around valid words)
+                cv2.rectangle(open_cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)  # green box
                 print(f"Found phrase '{target_text}' at: (x1: {x1}, y1: {y1}, x2: {x2}, y2: {y2})")
                 targets.append([x1, y1, x2, y2])
 
@@ -700,7 +687,7 @@ class ImageOcr:
 
         debug_image = open_cv_image.copy()  # make a copy so your final result isn't overwritten
 
-        # Draw all bounding boxes from Tesseract
+        # Draw bounding boxes for all valid words (after filtering out unwanted words)
         for i in range(len(detection_result['text'])):
             word = detection_result['text'][i].strip()
             if word:
@@ -708,8 +695,13 @@ class ImageOcr:
                 y = detection_result['top'][i]
                 w = detection_result['width'][i]
                 h = detection_result['height'][i]
-                cv2.rectangle(debug_image, (x, y), (x + w, y + h), (255, 0, 0), 2)  # blue boxes
-                cv2.putText(debug_image, word, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
-        cv2.imwrite("detected_text.png", debug_image)
+                # Draw bounding boxes for valid words
+                if len(word) > 1 and re.search(r'[a-zA-Z0-9]', word):
+                    cv2.rectangle(debug_image, (x, y), (x + w, y + h), (255, 0, 0), 2)  # blue boxes
+                    cv2.putText(debug_image, word, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+
+        # Save the debug image for review
+        cv2.imwrite("detected_text_filtered.jpg", debug_image)
+        print(f'OCR time: {time.time() - start}')
         return targets
